@@ -25,12 +25,10 @@ export default function Page() {
         // optional limits (safe defaults)
         maxFiles: 5,
         maxFileSize: 20, // MB
-        // optional: restrict types in the picker
-        accept: [
-          "application/pdf",
-          "text/plain",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ],
+
+        // ✅ ChatKit expects a single accept string (like <input accept="...">)
+        accept:
+          "application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       },
     },
   });
@@ -84,8 +82,10 @@ export default function Page() {
             background: "rgba(255,255,255,0.03)",
           }}
         >
-          {/* ✅ Ensure it fills the box */}
-          <ChatKit control={control} style={{ height: "100%", width: "100%", display: "block" }} />
+          <ChatKit
+            control={control}
+            style={{ height: "100%", width: "100%", display: "block" }}
+          />
         </div>
       </div>
     </div>
