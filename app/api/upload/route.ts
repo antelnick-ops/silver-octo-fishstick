@@ -3,56 +3,60 @@ import { toFile } from "openai/uploads";
 
 export const runtime = "nodejs";
 
-// Simple allowlist (adjust as needed)
 const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain"
 ]);
 
-const MAX_FILE_MB = 20; // change if you want
+const MAX_FILE_MB = 20;
 const MAX_BYTES = MAX_FILE_MB * 1024 * 1024;
 
 export async function POST(req: Request) {
   try {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
+    const apiKey = process.env.OPENAI_API_KEY;
     const vectorStoreId = process.env.VECTOR_STORE_ID;
-    if (!vectorStoreId) {
+
+    if (!apiKey) {
       return Response.json(
-        { error: "Missing VECTOR_STORE_ID env var" },
+        { ok: false, error: "Missing OPENAI_API_KEY env var" },
         { status: 500 }
       );
     }
 
-    // Parse multipart form data
-    const form = await req.formData();
+    if (!vectorStoreId) {
+      return Response.json(
+        { ok: false, error: "Missing VECTOR_STORE_ID env var" },
+        { status: 500 }
+      );
+    }
 
-    // Your <input name="files" type="file" multiple />
+    const openai = new OpenAI({ apiKey });
+
+    const form = await req.formData();
     const files = form.getAll("files") as unknown[];
 
     if (!files || files.length === 0) {
       return Response.json(
-        { error: "No files uploaded. Expected form field name: files" },
+        { ok: false, error: "No files uploaded. Expected form field name: files" },
         { status: 400 }
       );
     }
 
-    // Validate + upload each file to OpenAI Files
     const uploadedFileIds: string[] = [];
 
     for (const item of files) {
       if (!(item instanceof File)) {
         return Response.json(
-          { error: "Invalid upload. Each item must be a File." },
+          { ok: false, error: "Invalid upload. Each item must be a File." },
           { status: 400 }
         );
       }
 
-      // Basic checks
       if (!ALLOWED_MIME_TYPES.has(item.type)) {
         return Response.json(
           {
+            ok: false,
             error: `File type not allowed: ${item.type || "unknown"}`,
             allowed: Array.from(ALLOWED_MIME_TYPES)
           },
@@ -62,32 +66,29 @@ export async function POST(req: Request) {
 
       if (item.size > MAX_BYTES) {
         return Response.json(
-          { error: `File too large: ${item.name}. Max ${MAX_FILE_MB}MB.` },
+          {
+            ok: false,
+            error: `File too large: ${item.name}. Max ${MAX_FILE_MB}MB.`
+          },
           { status: 400 }
         );
       }
 
-      // Convert File -> Buffer -> OpenAI Uploadable
-      const arrayBuffer = await item.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
+      const buffer = Buffer.from(await item.arrayBuffer());
       const uploadable = await toFile(buffer, item.name, { type: item.type });
 
       const uploaded = await openai.files.create({
         file: uploadable,
-        // Use "assistants" for Files used with assistants/tools (vector store file search).
         purpose: "assistants"
       });
 
       uploadedFileIds.push(uploaded.id);
     }
 
-    // Attach uploaded files to the vector store in a single batch
     const batch = await openai.vectorStores.fileBatches.create(vectorStoreId, {
       file_ids: uploadedFileIds
     });
 
-    // Optional: you can poll until indexing is complete (good for UX).
-    // For now, we just return the batch id and file ids.
     return Response.json({
       ok: true,
       vector_store_id: vectorStoreId,
@@ -99,6 +100,7 @@ export async function POST(req: Request) {
     console.error(err);
     return Response.json(
       {
+        ok: false,
         error: "Upload failed",
         details: err?.message ?? String(err)
       },
