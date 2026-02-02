@@ -7,7 +7,7 @@ export default function Home() {
   const [reply, setReply] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function sendMessage() {
+  async function send() {
     if (!message.trim()) return;
 
     setLoading(true);
@@ -25,20 +25,26 @@ export default function Home() {
   }
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "sans-serif", maxWidth: 700 }}>
+    <main style={{ padding: 24, fontFamily: "sans-serif", maxWidth: 720 }}>
       <h1>North Wind Consulting AI</h1>
 
-      <p>Ask me anything:</p>
-
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <input
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          placeholder="Type your question..."
-          style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
+          placeholder="Ask a question..."
+          style={{
+            flex: 1,
+            padding: 10,
+            border: "1px solid #ccc",
+            borderRadius: 8,
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") send();
+          }}
         />
         <button
-          onClick={sendMessage}
+          onClick={send}
           disabled={loading}
           style={{ padding: "10px 14px", borderRadius: 8 }}
         >
@@ -46,12 +52,11 @@ export default function Home() {
         </button>
       </div>
 
-      {reply && (
-        <div style={{ marginTop: 20, padding: 12, background: "#f4f4f4", borderRadius: 8 }}>
-          <strong>Reply:</strong>
-          <div style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{reply}</div>
-        </div>
-      )}
+      <div style={{ marginTop: 16, whiteSpace: "pre-wrap" }}>
+        {reply && <strong>Reply:</strong>}
+        <div>{reply}</div>
+      </div>
     </main>
   );
 }
+
