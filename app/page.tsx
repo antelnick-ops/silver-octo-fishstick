@@ -9,11 +9,7 @@ type ChatMessage = {
   ts: number;
 };
 
-/**
- * ✅ FIXED: discriminated union where BOTH variants contain `ok`
- * - When ok === true → UploadOk (has uploaded_file_ids, status, etc.)
- * - When ok === false → UploadErr (has error/details/allowed)
- */
+/** Upload API shapes */
 type UploadOk = {
   ok: true;
   vector_store_id: string;
@@ -30,6 +26,20 @@ type UploadErr = {
 };
 
 type UploadResult = UploadOk | UploadErr;
+
+/** ✅ Type guards so TypeScript ALWAYS narrows correctly */
+function isUploadOk(x: any): x is UploadOk {
+  return (
+    x &&
+    x.ok === true &&
+    Array.isArray(x.uploaded_file_ids) &&
+    typeof x.status === "string"
+  );
+}
+
+function isUploadErr(x: any): x is UploadErr {
+  return x && x.ok === false && typeof x.error === "string";
+}
 
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -57,7 +67,6 @@ export default function ChatLikeWidget() {
   const canSend = useMemo(() => input.trim().length > 0 && !sending, [input, sending]);
 
   useEffect(() => {
-    // auto-scroll to bottom
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length]);
 
@@ -113,36 +122,49 @@ export default function ChatLikeWidget() {
       const fd = new FormData();
       for (const f of files) fd.append("files", f);
 
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: fd,
+      });
 
-      // NOTE: your /api/upload MUST return { ok: true, ... } on success
-      // and { ok: false, error: "...", ... } on failure.
-      const data = (await res.json()) as UploadResult;
+      const raw = await res.json();
 
-      // ✅ FIXED: Now TS knows data.error exists ONLY when ok === false
-      if (!data.ok) {
+      // ✅ Handle explicit error shape
+      if (isUploadErr(raw)) {
         setUploadInfo(
-          `Upload failed: ${data.error}${data.details ? ` (${data.details})` : ""}`
+          `Upload failed: ${raw.error}${raw.details ? ` (${raw.details})` : ""}`
         );
-        if (data.allowed?.length) {
-          push("system", `Allowed types: ${data.allowed.join(", ")}`);
+        if (raw.allowed?.length) {
+          push("system", `Allowed types: ${raw.allowed.join(", ")}`);
         }
         return;
       }
 
-      setUploadInfo(
-        `Uploaded ${data.uploaded_file_ids.length} file(s). Indexing status: ${data.status}`
-      );
-      push(
-        "system",
-        `📎 Uploaded ${files.length} file(s) to knowledge base. You can ask questions now.`
-      );
+      // ✅ Handle success shape
+      if (isUploadOk(raw)) {
+        setUploadInfo(
+          `Uploaded ${raw.uploaded_file_ids.length} file(s). Indexing status: ${raw.status}`
+        );
+        push(
+          "system",
+          `📎 Uploaded ${files.length} file(s) to knowledge base. You can ask questions now.`
+        );
 
-      // clear selection
-      setFiles([]);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+        setFiles([]);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+
+      // ✅ Fallback for unexpected server response shapes
+      const fallbackMsg = !res.ok
+        ? "Upload failed: server returned an error"
+        : "Upload failed: unexpected response format";
+
+      setUploadInfo(fallbackMsg);
+      push("system", fallbackMsg);
     } catch (e: any) {
       setUploadInfo(`Upload error: ${e?.message ?? String(e)}`);
+      push("system", `Upload error: ${e?.message ?? String(e)}`);
     } finally {
       setUploading(false);
     }
@@ -156,9 +178,7 @@ export default function ChatLikeWidget() {
           <div style={styles.dot} />
           <div>
             <div style={styles.title}>Proposal Assistant</div>
-            <div style={styles.subtitle}>
-              ChatGPT-style widget + file upload → vector store
-            </div>
+            <div style={styles.subtitle}>Chat widget + file upload → vector store</div>
           </div>
         </div>
 
@@ -227,7 +247,7 @@ export default function ChatLikeWidget() {
           style={styles.uploadBtn}
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          title="Add documents to the knowledge base"
+          title="Choose documents"
         >
           📎 Upload
         </button>
@@ -302,6 +322,7 @@ export default function ChatLikeWidget() {
   );
 }
 
+/** Minimal “ChatGPT-ish” styling without external libraries */
 const styles: Record<string, React.CSSProperties> = {
   shell: {
     height: "100vh",
@@ -326,7 +347,12 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#0b0f19",
   },
   brand: { display: "flex", alignItems: "center", gap: 10 },
-  dot: { width: 12, height: 12, borderRadius: 999, background: "rgba(255,255,255,0.9)" },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 999,
+    background: "rgba(255,255,255,0.9)",
+  },
   title: { fontWeight: 700, fontSize: 14, letterSpacing: 0.2 },
   subtitle: { fontSize: 12, opacity: 0.7, marginTop: 2 },
   chat: {
@@ -399,7 +425,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   uploadMeta: { flex: 1, display: "flex", justifyContent: "space-between", gap: 10 },
   uploadFiles: { display: "flex", alignItems: "center", gap: 8, minHeight: 22 },
-  filesPreview: { fontSize: 12, opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis" },
+  filesPreview: {
+    fontSize: 12,
+    opacity: 0.8,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
   pill: {
     fontSize: 11,
     padding: "3px 8px",
