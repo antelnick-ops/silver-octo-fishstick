@@ -9,7 +9,11 @@ type ChatMessage = {
   ts: number;
 };
 
-/** ✅ FIXED: Discriminated union with ok: true/false */
+/**
+ * ✅ FIXED: discriminated union where BOTH variants contain `ok`
+ * - When ok === true → UploadOk (has uploaded_file_ids, status, etc.)
+ * - When ok === false → UploadErr (has error/details/allowed)
+ */
 type UploadOk = {
   ok: true;
   vector_store_id: string;
@@ -73,7 +77,6 @@ export default function ChatLikeWidget() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Adjust payload to match your backend (this is the common simple format)
         body: JSON.stringify({ message: text }),
       });
 
@@ -84,7 +87,6 @@ export default function ChatLikeWidget() {
         return;
       }
 
-      // supports either { reply } or { answer } (depending on your route)
       const reply = data?.reply ?? data?.answer ?? JSON.stringify(data);
       push("assistant", reply);
     } catch (e: any) {
@@ -111,19 +113,17 @@ export default function ChatLikeWidget() {
       const fd = new FormData();
       for (const f of files) fd.append("files", f);
 
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: fd,
-      });
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
 
+      // NOTE: your /api/upload MUST return { ok: true, ... } on success
+      // and { ok: false, error: "...", ... } on failure.
       const data = (await res.json()) as UploadResult;
 
-      /** ✅ FIXED: check data.ok, not just res.ok */
+      // ✅ FIXED: Now TS knows data.error exists ONLY when ok === false
       if (!data.ok) {
         setUploadInfo(
           `Upload failed: ${data.error}${data.details ? ` (${data.details})` : ""}`
         );
-        // Optional: show allowed types if provided
         if (data.allowed?.length) {
           push("system", `Allowed types: ${data.allowed.join(", ")}`);
         }
@@ -275,7 +275,6 @@ export default function ChatLikeWidget() {
           onChange={(e) => setInput(e.target.value)}
           rows={1}
           onKeyDown={(e) => {
-            // Enter sends, Shift+Enter new line
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               sendMessage();
@@ -303,7 +302,6 @@ export default function ChatLikeWidget() {
   );
 }
 
-/** Minimal “ChatGPT-ish” styling without external libraries */
 const styles: Record<string, React.CSSProperties> = {
   shell: {
     height: "100vh",
@@ -328,12 +326,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#0b0f19",
   },
   brand: { display: "flex", alignItems: "center", gap: 10 },
-  dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 999,
-    background: "rgba(255,255,255,0.9)",
-  },
+  dot: { width: 12, height: 12, borderRadius: 999, background: "rgba(255,255,255,0.9)" },
   title: { fontWeight: 700, fontSize: 14, letterSpacing: 0.2 },
   subtitle: { fontSize: 12, opacity: 0.7, marginTop: 2 },
   chat: {
