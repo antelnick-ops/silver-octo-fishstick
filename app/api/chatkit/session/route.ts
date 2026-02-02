@@ -11,8 +11,6 @@ export async function POST() {
     return Response.json({ ok: false, error: "Missing WORKFLOW_ID" }, { status: 500 });
   }
 
-  // If your ChatKit UI showed version="draft", keep this as "draft".
-  // If you want production, delete the "version" field (or set WORKFLOW_VERSION to empty).
   const workflowVersion = process.env.WORKFLOW_VERSION || "draft";
 
   const res = await fetch("https://api.openai.com/v1/chatkit/sessions", {
@@ -20,12 +18,18 @@ export async function POST() {
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
-      // Required per ChatKit API docs:
       "OpenAI-Beta": "chatkit_beta=v1",
     },
     body: JSON.stringify({
       user: crypto.randomUUID(),
-      workflow: workflowVersion ? { id: workflowId, version: workflowVersion } : { id: workflowId },
+      workflow: workflowVersion
+        ? { id: workflowId, version: workflowVersion }
+        : { id: workflowId },
+
+      // ✅ THIS is what enables the upload button to actually work
+      file_upload: {
+        enabled: true,
+      },
     }),
   });
 
@@ -33,7 +37,11 @@ export async function POST() {
 
   if (!res.ok) {
     return Response.json(
-      { ok: false, error: "Failed to create ChatKit session", details: data },
+      {
+        ok: false,
+        error: "Failed to create ChatKit session",
+        details: data,
+      },
       { status: 500 }
     );
   }
