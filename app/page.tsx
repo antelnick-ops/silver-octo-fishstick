@@ -17,19 +17,18 @@ export default function Page() {
       },
     },
 
-    // ✅ This turns on the chat bar + upload button
     composer: {
       placeholder: "Message…",
       attachments: {
         enabled: true,
-        maxFiles: 5,
-        maxFileSize: 20, // MB
 
         // ✅ Your ChatKit version expects Record<string, string[]>
         accept: {
           "application/pdf": [".pdf"],
           "text/plain": [".txt"],
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
+            ".docx",
+          ],
         },
       },
     },
@@ -83,7 +82,10 @@ export default function Page() {
             background: "rgba(255,255,255,0.03)",
           }}
         >
-          <ChatKit control={control} style={{ height: "100%", width: "100%", display: "block" }} />
+          <ChatKit
+            control={control}
+            style={{ height: "100%", width: "100%", display: "block" }}
+          />
         </div>
       </div>
     </div>
