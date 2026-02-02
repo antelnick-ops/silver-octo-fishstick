@@ -9,15 +9,23 @@ type ChatMessage = {
   ts: number;
 };
 
-type UploadResult =
-  | {
-      ok: true;
-      vector_store_id: string;
-      uploaded_file_ids: string[];
-      file_batch_id: string;
-      status: string;
-    }
-  | { error: string; details?: string; allowed?: string[] };
+/** ✅ FIXED: Discriminated union with ok: true/false */
+type UploadOk = {
+  ok: true;
+  vector_store_id: string;
+  uploaded_file_ids: string[];
+  file_batch_id: string;
+  status: string;
+};
+
+type UploadErr = {
+  ok: false;
+  error: string;
+  details?: string;
+  allowed?: string[];
+};
+
+type UploadResult = UploadOk | UploadErr;
 
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -110,8 +118,15 @@ export default function ChatLikeWidget() {
 
       const data = (await res.json()) as UploadResult;
 
-      if (!res.ok) {
-        setUploadInfo(`Upload failed: ${(data as any)?.error ?? "Unknown error"}`);
+      /** ✅ FIXED: check data.ok, not just res.ok */
+      if (!data.ok) {
+        setUploadInfo(
+          `Upload failed: ${data.error}${data.details ? ` (${data.details})` : ""}`
+        );
+        // Optional: show allowed types if provided
+        if (data.allowed?.length) {
+          push("system", `Allowed types: ${data.allowed.join(", ")}`);
+        }
         return;
       }
 
@@ -228,9 +243,7 @@ export default function ChatLikeWidget() {
                 </span>
               </>
             ) : (
-              <span style={{ opacity: 0.75 }}>
-                Upload PDFs/DOCX/TXT to improve answers
-              </span>
+              <span style={{ opacity: 0.75 }}>Upload PDFs/DOCX/TXT to improve answers</span>
             )}
           </div>
 
