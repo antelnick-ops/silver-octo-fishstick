@@ -1,7 +1,8 @@
-// app/layout.tsx 
+// app/layout.tsx
+import Script from "next/script";
 
 export const metadata = {
-  title: "My App",
+  title: "Northwind AI Widget",
   description: "Deployed on Vercel",
 };
 
@@ -12,6 +13,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <Script
+          src="https://cdn.platform.openai.com/deployments/chatkit/chatkit.js"
+          strategy="afterInteractive"
+        />
+      </head>
       <body>{children}</body>
     </html>
   );
