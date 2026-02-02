@@ -1,68 +1,178 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant" | "system";
+  text: string;
+  ts: number;
+};
 
-export default function Home() {
-  const [messages, setMessages] = useState<Msg[]>([
+type UploadResult =
+  | {
+      ok: true;
+      vector_store_id: string;
+      uploaded_file_ids: string[];
+      file_batch_id: string;
+      status: string;
+    }
+  | { error: string; details?: string; allowed?: string[] };
+
+function uid() {
+  return Math.random().toString(16).slice(2) + Date.now().toString(16);
+}
+
+export default function ChatLikeWidget() {
+  const [messages, setMessages] = useState<ChatMessage[]>([
     {
+      id: uid(),
       role: "assistant",
-      content: "Hi — I’m North Wind Consulting AI. What can I help you with today?",
+      text: "Hi — upload your docs, then ask me questions about them.",
+      ts: Date.now(),
     },
   ]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
 
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadInfo, setUploadInfo] = useState<string>("");
+
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const canSend = useMemo(() => input.trim().length > 0 && !sending, [input, sending]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+    // auto-scroll to bottom
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages.length]);
 
-  async function send() {
+  function push(role: ChatMessage["role"], text: string) {
+    setMessages((m) => [...m, { id: uid(), role, text, ts: Date.now() }]);
+  }
+
+  async function sendMessage() {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || sending) return;
 
+    push("user", text);
     setInput("");
-    const nextMessages: Msg[] = [...messages, { role: "user", content: text }];
-    setMessages(nextMessages);
-    setLoading(true);
+    setSending(true);
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // send the latest user message; you can later send full history if you want
+        // Adjust payload to match your backend (this is the common simple format)
         body: JSON.stringify({ message: text }),
       });
 
       const data = await res.json();
-      setMessages([...nextMessages, { role: "assistant", content: data.reply || "…" }]);
-    } catch {
-      setMessages([
-        ...nextMessages,
-        { role: "assistant", content: "Sorry — something went wrong. Try again." },
-      ]);
+
+      if (!res.ok) {
+        push("system", `Error: ${data?.error ?? "Request failed"}`);
+        return;
+      }
+
+      // supports either { reply } or { answer } (depending on your route)
+      const reply = data?.reply ?? data?.answer ?? JSON.stringify(data);
+      push("assistant", reply);
+    } catch (e: any) {
+      push("system", `Network error: ${e?.message ?? String(e)}`);
     } finally {
-      setLoading(false);
+      setSending(false);
+    }
+  }
+
+  function onPickFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(e.target.files ?? []);
+    if (!picked.length) return;
+    setFiles(picked);
+    setUploadInfo("");
+  }
+
+  async function uploadFiles() {
+    if (!files.length || uploading) return;
+
+    setUploading(true);
+    setUploadInfo("");
+
+    try {
+      const fd = new FormData();
+      for (const f of files) fd.append("files", f);
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: fd,
+      });
+
+      const data = (await res.json()) as UploadResult;
+
+      if (!res.ok) {
+        setUploadInfo(`Upload failed: ${(data as any)?.error ?? "Unknown error"}`);
+        return;
+      }
+
+      setUploadInfo(
+        `Uploaded ${data.uploaded_file_ids.length} file(s). Indexing status: ${data.status}`
+      );
+      push(
+        "system",
+        `📎 Uploaded ${files.length} file(s) to knowledge base. You can ask questions now.`
+      );
+
+      // clear selection
+      setFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (e: any) {
+      setUploadInfo(`Upload error: ${e?.message ?? String(e)}`);
+    } finally {
+      setUploading(false);
     }
   }
 
   return (
     <div style={styles.shell}>
-      <header style={styles.header}>
-        <div style={styles.brandDot} />
-        <div>
-          <div style={styles.title}>North Wind Consulting AI</div>
-          <div style={styles.subtitle}>Ask a question • Get an answer</div>
+      {/* Header */}
+      <div style={styles.header}>
+        <div style={styles.brand}>
+          <div style={styles.dot} />
+          <div>
+            <div style={styles.title}>Proposal Assistant</div>
+            <div style={styles.subtitle}>
+              ChatGPT-style widget + file upload → vector store
+            </div>
+          </div>
         </div>
-      </header>
 
-      <main style={styles.chat}>
-        {messages.map((m, idx) => (
+        <button
+          style={styles.smallBtn}
+          onClick={() => {
+            setMessages([
+              {
+                id: uid(),
+                role: "assistant",
+                text: "New session started. Upload docs, then ask me anything.",
+                ts: Date.now(),
+              },
+            ]);
+            setUploadInfo("");
+            setFiles([]);
+            setInput("");
+          }}
+          title="New chat"
+        >
+          New
+        </button>
+      </div>
+
+      {/* Messages */}
+      <div ref={listRef} style={styles.chat}>
+        {messages.map((m) => (
           <div
-            key={idx}
+            key={m.id}
             style={{
               ...styles.row,
               justifyContent: m.role === "user" ? "flex-end" : "flex-start",
@@ -71,142 +181,250 @@ export default function Home() {
             <div
               style={{
                 ...styles.bubble,
-                ...(m.role === "user" ? styles.userBubble : styles.assistantBubble),
+                ...(m.role === "user"
+                  ? styles.userBubble
+                  : m.role === "assistant"
+                  ? styles.assistantBubble
+                  : styles.systemBubble),
               }}
             >
-              {m.content}
+              <div style={styles.bubbleRole}>
+                {m.role === "user" ? "You" : m.role === "assistant" ? "Assistant" : "System"}
+              </div>
+              <div style={styles.bubbleText}>{m.text}</div>
             </div>
           </div>
         ))}
+      </div>
 
-        {loading && (
-          <div style={{ ...styles.row, justifyContent: "flex-start" }}>
-            <div style={{ ...styles.bubble, ...styles.assistantBubble, opacity: 0.8 }}>
-              Typing…
-            </div>
+      {/* Upload strip */}
+      <div style={styles.uploadStrip}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          onChange={onPickFiles}
+          style={{ display: "none" }}
+          accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        />
+
+        <button
+          style={styles.uploadBtn}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          title="Add documents to the knowledge base"
+        >
+          📎 Upload
+        </button>
+
+        <div style={styles.uploadMeta}>
+          <div style={styles.uploadFiles}>
+            {files.length ? (
+              <>
+                <span style={styles.pill}>{files.length} selected</span>
+                <span style={styles.filesPreview}>
+                  {files.slice(0, 2).map((f) => f.name).join(", ")}
+                  {files.length > 2 ? ` (+${files.length - 2} more)` : ""}
+                </span>
+              </>
+            ) : (
+              <span style={{ opacity: 0.75 }}>
+                Upload PDFs/DOCX/TXT to improve answers
+              </span>
+            )}
           </div>
-        )}
 
-        <div ref={bottomRef} />
-      </main>
+          <div style={styles.uploadActions}>
+            <button
+              style={{
+                ...styles.smallBtn,
+                opacity: files.length ? 1 : 0.5,
+                cursor: files.length ? "pointer" : "not-allowed",
+              }}
+              onClick={uploadFiles}
+              disabled={!files.length || uploading}
+              title="Send selected files to the vector store"
+            >
+              {uploading ? "Uploading…" : "Add to Knowledge"}
+            </button>
+          </div>
+        </div>
+      </div>
 
-      <footer style={styles.footer}>
-        <div style={styles.inputWrap}>
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Message North Wind Consulting AI…"
-            style={styles.input}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") send();
-            }}
-          />
-          <button onClick={send} disabled={loading || !input.trim()} style={styles.button}>
-            Send
-          </button>
-        </div>
-        <div style={styles.disclaimer}>
-          Responses may be imperfect. Don’t share sensitive information.
-        </div>
-      </footer>
+      {uploadInfo ? <div style={styles.uploadInfo}>{uploadInfo}</div> : null}
+
+      {/* Composer */}
+      <div style={styles.composer}>
+        <textarea
+          style={styles.textarea}
+          placeholder="Message… (Ask about your uploaded docs)"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          rows={1}
+          onKeyDown={(e) => {
+            // Enter sends, Shift+Enter new line
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              sendMessage();
+            }
+          }}
+        />
+        <button
+          style={{
+            ...styles.sendBtn,
+            opacity: canSend ? 1 : 0.5,
+            cursor: canSend ? "pointer" : "not-allowed",
+          }}
+          onClick={sendMessage}
+          disabled={!canSend}
+          title="Send message"
+        >
+          {sending ? "…" : "Send"}
+        </button>
+      </div>
+
+      <div style={styles.footer}>
+        Tip: Upload a SOW, then ask “List deliverables, deadlines, and reporting cadence.”
+      </div>
     </div>
   );
 }
 
+/** Minimal “ChatGPT-ish” styling without external libraries */
 const styles: Record<string, React.CSSProperties> = {
   shell: {
     height: "100vh",
+    maxHeight: 650,
+    width: "100%",
+    maxWidth: 560,
+    margin: "0 auto",
+    border: "1px solid rgba(0,0,0,0.08)",
+    borderRadius: 18,
+    overflow: "hidden",
+    background: "#0b0f19",
+    color: "rgba(255,255,255,0.92)",
     display: "flex",
     flexDirection: "column",
-    fontFamily:
-      'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"',
-    background: "#0b0f17",
-    color: "#e7eaf0",
   },
   header: {
+    padding: "14px 14px",
     display: "flex",
-    gap: 12,
     alignItems: "center",
-    padding: "14px 16px",
+    justifyContent: "space-between",
     borderBottom: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(11,15,23,0.9)",
-    backdropFilter: "blur(10px)",
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
+    background: "#0b0f19",
   },
-  brandDot: {
+  brand: { display: "flex", alignItems: "center", gap: 10 },
+  dot: {
     width: 12,
     height: 12,
     borderRadius: 999,
-    background: "#22c55e",
-    boxShadow: "0 0 0 4px rgba(34,197,94,0.15)",
+    background: "rgba(255,255,255,0.9)",
   },
-  title: { fontWeight: 700, letterSpacing: 0.2 },
+  title: { fontWeight: 700, fontSize: 14, letterSpacing: 0.2 },
   subtitle: { fontSize: 12, opacity: 0.7, marginTop: 2 },
-
   chat: {
     flex: 1,
+    padding: 14,
     overflowY: "auto",
-    padding: "18px 14px 24px",
-    maxWidth: 900,
-    width: "100%",
-    margin: "0 auto",
+    background:
+      "radial-gradient(1200px 600px at 50% -100px, rgba(255,255,255,0.08), transparent 60%), #0b0f19",
   },
-  row: { display: "flex", padding: "8px 0" },
+  row: { display: "flex", marginBottom: 12 },
   bubble: {
-    maxWidth: "80%",
-    padding: "12px 14px",
+    maxWidth: "86%",
     borderRadius: 16,
-    lineHeight: 1.4,
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
-    fontSize: 15,
-  },
-  assistantBubble: {
-    background: "rgba(255,255,255,0.06)",
-    border: "1px solid rgba(255,255,255,0.08)",
-    borderTopLeftRadius: 6,
-  },
-  userBubble: {
-    background: "rgba(34,197,94,0.18)",
-    border: "1px solid rgba(34,197,94,0.25)",
-    borderTopRightRadius: 6,
-  },
-
-  footer: {
-    borderTop: "1px solid rgba(255,255,255,0.08)",
-    padding: "12px 12px 14px",
-    background: "rgba(11,15,23,0.9)",
+    padding: "10px 12px",
+    border: "1px solid rgba(255,255,255,0.10)",
     backdropFilter: "blur(10px)",
   },
-  inputWrap: {
+  userBubble: { background: "rgba(255,255,255,0.10)" },
+  assistantBubble: { background: "rgba(255,255,255,0.06)" },
+  systemBubble: { background: "rgba(255,255,255,0.03)", opacity: 0.9 },
+  bubbleRole: { fontSize: 11, opacity: 0.65, marginBottom: 6 },
+  bubbleText: { whiteSpace: "pre-wrap", lineHeight: 1.35, fontSize: 13 },
+  composer: {
+    padding: 12,
     display: "flex",
     gap: 10,
-    maxWidth: 900,
-    margin: "0 auto",
+    borderTop: "1px solid rgba(255,255,255,0.08)",
+    background: "#0b0f19",
   },
-  input: {
+  textarea: {
     flex: 1,
-    padding: "12px 12px",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.12)",
-    background: "rgba(255,255,255,0.04)",
-    color: "#e7eaf0",
+    resize: "none",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "rgba(255,255,255,0.92)",
+    padding: "10px 12px",
     outline: "none",
+    fontSize: 13,
+    lineHeight: 1.35,
+    minHeight: 42,
+    maxHeight: 120,
   },
-  button: {
-    padding: "12px 14px",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.12)",
-    background: "rgba(255,255,255,0.08)",
-    color: "#e7eaf0",
+  sendBtn: {
+    padding: "10px 14px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.10)",
+    color: "rgba(255,255,255,0.92)",
+    fontWeight: 700,
+    minWidth: 74,
+  },
+  uploadStrip: {
+    padding: "10px 12px",
+    display: "flex",
+    gap: 10,
+    alignItems: "flex-start",
+    borderTop: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.02)",
+  },
+  uploadBtn: {
+    padding: "10px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "rgba(255,255,255,0.92)",
+    fontWeight: 700,
     cursor: "pointer",
+    whiteSpace: "nowrap",
   },
-  disclaimer: {
-    maxWidth: 900,
-    margin: "10px auto 0",
+  uploadMeta: { flex: 1, display: "flex", justifyContent: "space-between", gap: 10 },
+  uploadFiles: { display: "flex", alignItems: "center", gap: 8, minHeight: 22 },
+  filesPreview: { fontSize: 12, opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis" },
+  pill: {
+    fontSize: 11,
+    padding: "3px 8px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+  },
+  uploadActions: { display: "flex", alignItems: "center" },
+  uploadInfo: {
+    padding: "8px 12px",
     fontSize: 12,
-    opacity: 0.55,
+    opacity: 0.85,
+    borderTop: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.02)",
+  },
+  smallBtn: {
+    padding: "8px 10px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "rgba(255,255,255,0.92)",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+  },
+  footer: {
+    padding: "10px 12px",
+    fontSize: 11,
+    opacity: 0.65,
+    borderTop: "1px solid rgba(255,255,255,0.08)",
+    background: "#0b0f19",
   },
 };
