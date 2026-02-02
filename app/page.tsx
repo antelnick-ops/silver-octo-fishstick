@@ -14,11 +14,28 @@ export default function Page() {
         if (!res.ok) throw new Error(data?.error ?? "Session failed");
         if (!data?.client_secret) throw new Error("Missing client_secret");
         return data.client_secret;
-      }
-    }
+      },
+    },
+
+    // ✅ This turns on the chat bar + upload button
+    composer: {
+      placeholder: "Message…",
+      attachments: {
+        enabled: true,
+        // optional limits (safe defaults)
+        maxFiles: 5,
+        maxFileSize: 20, // MB
+        // optional: restrict types in the picker
+        accept: [
+          "application/pdf",
+          "text/plain",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ],
+      },
+    },
   });
 
-  // If something throws during mount, show it
+  // Show runtime errors on screen
   useEffect(() => {
     const onErr = (e: any) => setErr(e?.message ?? String(e));
     window.addEventListener("error", onErr);
@@ -37,7 +54,7 @@ export default function Page() {
         color: "white",
         padding: 16,
         display: "grid",
-        placeItems: "center"
+        placeItems: "center",
       }}
     >
       <div style={{ width: "100%", maxWidth: 680 }}>
@@ -50,7 +67,8 @@ export default function Page() {
               border: "1px solid rgba(255,0,0,0.35)",
               padding: 12,
               borderRadius: 12,
-              whiteSpace: "pre-wrap"
+              whiteSpace: "pre-wrap",
+              marginBottom: 12,
             }}
           >
             {String(err)}
@@ -63,10 +81,11 @@ export default function Page() {
             borderRadius: 16,
             overflow: "hidden",
             border: "1px solid rgba(255,255,255,0.12)",
-            background: "rgba(255,255,255,0.03)"
+            background: "rgba(255,255,255,0.03)",
           }}
         >
-          <ChatKit control={control} />
+          {/* ✅ Ensure it fills the box */}
+          <ChatKit control={control} style={{ height: "100%", width: "100%", display: "block" }} />
         </div>
       </div>
     </div>
