@@ -22,18 +22,19 @@ export default function Page() {
       placeholder: "Message…",
       attachments: {
         enabled: true,
-        // optional limits (safe defaults)
         maxFiles: 5,
         maxFileSize: 20, // MB
 
-        // ✅ ChatKit expects a single accept string (like <input accept="...">)
-        accept:
-          "application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        // ✅ Your ChatKit version expects Record<string, string[]>
+        accept: {
+          "application/pdf": [".pdf"],
+          "text/plain": [".txt"],
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+        },
       },
     },
   });
 
-  // Show runtime errors on screen
   useEffect(() => {
     const onErr = (e: any) => setErr(e?.message ?? String(e));
     window.addEventListener("error", onErr);
@@ -82,10 +83,7 @@ export default function Page() {
             background: "rgba(255,255,255,0.03)",
           }}
         >
-          <ChatKit
-            control={control}
-            style={{ height: "100%", width: "100%", display: "block" }}
-          />
+          <ChatKit control={control} style={{ height: "100%", width: "100%", display: "block" }} />
         </div>
       </div>
     </div>
