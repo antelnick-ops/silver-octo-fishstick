@@ -8,13 +8,14 @@ export default function Page() {
       async getClientSecret() {
         const res = await fetch("/api/chatkit/session", { method: "POST" });
         const data = await res.json();
+        if (!res.ok) throw new Error(data?.error ?? "Session failed");
         return data.client_secret;
       },
     },
   });
 
   return (
-    <div style={{ height: "100vh", display: "flex", justifyContent: "center", padding: 20 }}>
+    <div style={{ height: "100vh", display: "grid", placeItems: "center", padding: 20 }}>
       <div style={{ width: "100%", maxWidth: 560, height: 650 }}>
         <ChatKit control={control} />
       </div>
