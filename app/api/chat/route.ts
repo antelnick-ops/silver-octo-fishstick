@@ -1,19 +1,44 @@
-import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 export async function POST(req: Request) {
-  const { message } = await req.json();
+  try {
+    const { message } = await req.json();
 
-  const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
+    if (!message) {
+      return NextResponse.json({ ok: false, error: "Missing message" }, { status: 400 });
+    }
 
-  const response = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [{ role: "user", content: message }],
-  });
+    const workflowId = process.env.WORKFLOW_ID;
+    if (!workflowId) {
+      return NextResponse.json(
+        { ok: false, error: "Missing WORKFLOW_ID env var" },
+        { status: 500 }
+      );
+    }
 
-  return NextResponse.json({
-    reply: response.choices[0]?.message?.content ?? "",
-  });
+    // 🔥 This runs your Workflow (which has your vector store + agents)
+    const result = await openai.responses.create({
+      model: "gpt-4o-mini",
+      input: message,
+      // This is the important part:
+      workflow: workflowId,
+    });
+
+    const text =
+      result.output_text || "No response text returned from workflow.";
+
+    return NextResponse.json({ ok: true, reply: text });
+  } catch (err: any) {
+    return NextResponse.json(
+      { ok: false, error: "Chat failed", details: err?.message ?? String(err) },
+      { status: 500 }
+    );
+  }
 }
