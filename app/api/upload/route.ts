@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 
 // NOTE: Vercel Functions have a ~4.5MB request body limit.
 // If you keep MAX_FILE_MB > 4, uploads will fail before this code runs.
-// See: FUNCTION_PAYLOAD_TOO_LARGE / 4.5MB limit on Vercel. :contentReference[oaicite:1]{index=1}
+// See: FUNCTION_PAYLOAD_TOO_LARGE / 4.5MB limit on Vercel.
 const MAX_FILE_MB = 4;
 const MAX_BYTES = MAX_FILE_MB * 1024 * 1024;
 
@@ -99,9 +99,18 @@ export async function POST(req: Request) {
       uploadedFileIds.push(uploaded.id);
     }
 
-    const batch = await openai.vectorStores.fileBatches.create(vectorStoreId, {
-      file_ids: uploadedFileIds,
-    });
+    // ✅ Add uploaded files to the vector store and WAIT until indexing finishes
+    const batch = await openai.vector_stores.file_batches.create_and_poll(
+      vectorStoreId,
+      { file_ids: uploadedFileIds }
+    troubled);
+
+    if (batch.status !== "completed") {
+      return NextResponse.json(
+        { ok: false, error: "Vector store indexing did not complete", batch },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       ok: true,
@@ -109,6 +118,7 @@ export async function POST(req: Request) {
       uploaded_file_ids: uploadedFileIds,
       file_batch_id: batch.id,
       status: batch.status,
+      file_counts: batch.file_counts,
     });
   } catch (err: any) {
     console.error(err);
