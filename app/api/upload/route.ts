@@ -6,7 +6,6 @@ export const runtime = "nodejs";
 
 // NOTE: Vercel Functions have a ~4.5MB request body limit.
 // If you keep MAX_FILE_MB > 4, uploads will fail before this code runs.
-// See: FUNCTION_PAYLOAD_TOO_LARGE / 4.5MB limit on Vercel.
 const MAX_FILE_MB = 4;
 const MAX_BYTES = MAX_FILE_MB * 1024 * 1024;
 
@@ -33,6 +32,7 @@ export async function POST(req: Request) {
         { status: 500 }
       );
     }
+
     if (!vectorStoreId) {
       return NextResponse.json(
         { ok: false, error: "Missing VECTOR_STORE_ID env var" },
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
 
     const form = await req.formData();
 
-    // Accept both "files" (multiple) and "file" (single) to avoid client mismatch
+    // Accept both "files" (multiple) and "file" (single)
     const rawFiles = [
       ...form.getAll("files"),
       ...(form.get("file") ? [form.get("file")] : []),
@@ -67,7 +67,7 @@ export async function POST(req: Request) {
         );
       }
 
-      // Size check (remember: Vercel will hard-fail above ~4.5MB anyway)
+      // Size check (Vercel will hard-fail above ~4.5MB anyway)
       if (item.size > MAX_BYTES) {
         return NextResponse.json(
           { ok: false, error: `File too large: ${item.name}. Max ~${MAX_FILE_MB}MB on Vercel.` },
@@ -91,6 +91,7 @@ export async function POST(req: Request) {
       const buffer = Buffer.from(await item.arrayBuffer());
       const uploadable = await toFile(buffer, item.name, { type: mime });
 
+      // Upload file to OpenAI
       const uploaded = await openai.files.create({
         file: uploadable,
         purpose: "assistants",
@@ -99,11 +100,11 @@ export async function POST(req: Request) {
       uploadedFileIds.push(uploaded.id);
     }
 
-    // ✅ Add uploaded files to the vector store and WAIT until indexing finishes
+    // Add uploaded files to the vector store and WAIT until indexing finishes
     const batch = await openai.vector_stores.file_batches.create_and_poll(
       vectorStoreId,
       { file_ids: uploadedFileIds }
-    troubled);
+    );
 
     if (batch.status !== "completed") {
       return NextResponse.json(
