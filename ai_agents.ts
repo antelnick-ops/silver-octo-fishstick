@@ -1,11 +1,65 @@
 import OpenAI from "openai";
 
+type Citation = {
+  /** The exact quoted snippet (best-effort). */
+  quote?: string;
+  /** Source label / filename if available. */
+  source?: string;
+  /** File id if available. */
+  file_id?: string;
+};
+
 /**
  * Shared OpenAI client
  */
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+function getVectorStoreId(): string | null {
+  const id = process.env.VECTOR_STORE_ID;
+  return id && id.trim().length ? id.trim() : null;
+}
+
+/**
+ * Best-effort extraction of citations/annotations returned by the Responses API.
+ * We return something usable for your UI without assuming a specific response shape.
+ */
+function extractCitations(response: any): Citation[] {
+  const citations: Citation[] = [];
+
+  // Newer Responses API shapes often include `output` with messages and content items.
+  const output = response?.output;
+  if (Array.isArray(output)) {
+    for (const item of output) {
+      const content = item?.content;
+      if (!Array.isArray(content)) continue;
+      for (const c of content) {
+        const annotations = c?.annotations;
+        if (!Array.isArray(annotations)) continue;
+        for (const a of annotations) {
+          // `file_citation` is the common annotation type for retrieval.
+          const isFileCitation = a?.type === "file_citation" || a?.type === "file_reference";
+          if (!isFileCitation) continue;
+          citations.push({
+            quote: a?.quote,
+            source: a?.filename || a?.source,
+            file_id: a?.file_id,
+          });
+        }
+      }
+    }
+  }
+
+  // De-dupe (basic)
+  const seen = new Set<string>();
+  return citations.filter((c) => {
+    const key = `${c.file_id || ""}|${c.source || ""}|${c.quote || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 /**
  * Supervisor: classifies the user request
@@ -80,15 +134,34 @@ async function runSpecialtyAgent(
       systemPrompt = "You are a helpful proposal assistant.";
   }
 
+  const vectorStoreId = getVectorStoreId();
+
+  // If a vector store is configured, enable retrieval. Otherwise fall back gracefully.
+  const tools = vectorStoreId ? [{ type: "file_search" as const }] : undefined;
+  const tool_resources = vectorStoreId
+    ? { file_search: { vector_store_ids: [vectorStoreId] } }
+    : undefined;
+
+  const retrievalInstructions = vectorStoreId
+    ? "\n\nIMPORTANT: Use the file_search tool to answer questions based on uploaded documents. Quote and cite the exact relevant text. If the answer is not in the documents, say you could not find it in the uploaded files."
+    : "\n\nNOTE: No vector store is configured (VECTOR_STORE_ID missing). Answer normally.";
+
   const response = await client.responses.create({
     model: "gpt-4.1",
+    tools,
+    tool_resources,
     input: [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: systemPrompt + retrievalInstructions },
       { role: "user", content: userInput }
     ]
   });
 
-  return response.output_text ?? "No response generated.";
+  return {
+    text: response.output_text ?? "No response generated.",
+    citations: extractCitations(response),
+    used_vector_store: Boolean(vectorStoreId),
+    vector_store_id: vectorStoreId,
+  };
 }
 
 /**
@@ -100,12 +173,15 @@ export async function runWorkflow(userInput: string) {
   const classification = await classifyIntent(userInput);
 
   // 2. Route to correct agent
-  const answer = await runSpecialtyAgent(classification, userInput);
+  const result = await runSpecialtyAgent(classification, userInput);
 
   // 3. Return everything needed by UI
   return {
     classification,
-    answer
+    answer: result.text,
+    citations: result.citations,
+    used_vector_store: result.used_vector_store,
+    vector_store_id: result.vector_store_id,
   };
 }
 
