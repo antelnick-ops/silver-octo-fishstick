@@ -1,60 +1,120 @@
+import OpenAI from "openai";
+import { toFile } from "openai/uploads";
+import { NextResponse } from "next/server";
+
 export const runtime = "nodejs";
 
-export async function POST() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  const workflowId = process.env.WORKFLOW_ID;
-  const workflowVersion = process.env.WORKFLOW_VERSION || "draft";
+// Vercel Functions have ~4.5MB request body limit.
+const MAX_FILE_MB = 4;
+const MAX_BYTES = MAX_FILE_MB * 1024 * 1024;
 
-  if (!apiKey) {
-    return Response.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
-  }
-  if (!workflowId) {
-    return Response.json({ error: "Missing WORKFLOW_ID" }, { status: 500 });
-  }
+const ALLOWED_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
+  "application/octet-stream",
+]);
 
-  const upstream = await fetch("https://api.openai.com/v1/chatkit/sessions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-      "OpenAI-Beta": "chatkit_beta=v1",
-    },
-    body: JSON.stringify({
-      user: crypto.randomUUID(),
-      workflow: workflowVersion
-        ? { id: workflowId, version: workflowVersion }
-        : { id: workflowId },
+function isAllowedByExtension(filename: string) {
+  const lower = filename.toLowerCase();
+  return lower.endsWith(".pdf") || lower.endsWith(".docx") || lower.endsWith(".txt");
+}
 
-      // Enable attachments in ChatKit UI
-      chatkit_configuration: {
-        file_upload: {
-          enabled: true,
-          max_files: 10,
-          max_file_size: 512, // MB
-        },
-      },
-    }),
-  });
-
-  const text = await upstream.text();
-  let data: any;
+export async function POST(req: Request) {
   try {
-    data = JSON.parse(text);
-  } catch {
-    data = { raw: text };
-  }
+    const apiKey = process.env.OPENAI_API_KEY;
+    const vectorStoreId = process.env.VECTOR_STORE_ID;
 
-  if (!upstream.ok) {
-    return Response.json(
-      {
-        error: "ChatKit session create failed",
-        status: upstream.status,
-        upstream: data,
-        using: { workflowId, workflowVersion: workflowVersion || null },
-      },
+    if (!apiKey) {
+      return NextResponse.json({ ok: false, success: false, error: "Missing OPENAI_API_KEY" }, { status: 500 });
+    }
+    if (!vectorStoreId) {
+      return NextResponse.json({ ok: false, success: false, error: "Missing VECTOR_STORE_ID" }, { status: 500 });
+    }
+
+    const openai = new OpenAI({ apiKey });
+
+    const form = await req.formData();
+
+    // Accept "files" (multiple) and "file" (single)
+    const rawFiles = [
+      ...form.getAll("files"),
+      ...(form.get("file") ? [form.get("file")] : []),
+    ].filter(Boolean);
+
+    if (rawFiles.length === 0) {
+      return NextResponse.json(
+        { ok: false, success: false, error: "No files uploaded. Use form field name: files (or file)." },
+        { status: 400 }
+      );
+    }
+
+    const uploadedFileIds: string[] = [];
+
+    for (const item of rawFiles) {
+      if (!(item instanceof File)) {
+        return NextResponse.json(
+          { ok: false, success: false, error: "Invalid upload. Each item must be a File." },
+          { status: 400 }
+        );
+      }
+
+      if (item.size > MAX_BYTES) {
+        return NextResponse.json(
+          { ok: false, success: false, error: `File too large: ${item.name}. Max ~${MAX_FILE_MB}MB on Vercel.` },
+          { status: 400 }
+        );
+      }
+
+      const mime = item.type || "application/octet-stream";
+      if (!ALLOWED_MIME_TYPES.has(mime) && !isAllowedByExtension(item.name)) {
+        return NextResponse.json(
+          { ok: false, success: false, error: `File type not allowed: ${mime}`, allowed: ["pdf", "docx", "txt"] },
+          { status: 400 }
+        );
+      }
+
+      const buffer = Buffer.from(await item.arrayBuffer());
+      const uploadable = await toFile(buffer, item.name, { type: mime });
+
+      const uploaded = await openai.files.create({
+        file: uploadable,
+        purpose: "assistants",
+      });
+
+      uploadedFileIds.push(uploaded.id);
+    }
+
+    // Add to vector store AND WAIT until indexing finishes
+    const batch = await openai.vector_stores.file_batches.create_and_poll(
+      vectorStoreId,
+      { file_ids: uploadedFileIds }
+    );
+
+    if (batch.status !== "completed") {
+      return NextResponse.json(
+        { ok: false, success: false, error: "Vector store indexing did not complete", batch },
+        { status: 500 }
+      );
+    }
+
+    // ✅ Return a VERY compatible response so your widget doesn't complain
+    return NextResponse.json({
+      ok: true,
+      success: true,
+      message: "Added to knowledge base",
+      status: "completed",
+      file_batch_id: batch.id,
+
+      // return both field names (different UIs expect different keys)
+      file_ids: uploadedFileIds,
+      uploaded_file_ids: uploadedFileIds,
+    });
+  } catch (err: any) {
+    console.error(err);
+    return NextResponse.json(
+      { ok: false, success: false, error: "Upload failed", details: err?.message ?? String(err) },
       { status: 500 }
     );
   }
-
-  return Response.json({ client_secret: data.client_secret });
 }
