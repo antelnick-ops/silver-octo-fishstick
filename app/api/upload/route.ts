@@ -4,7 +4,6 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-// Vercel Functions have ~4.5MB request body limit.
 const MAX_FILE_MB = 4;
 const MAX_BYTES = MAX_FILE_MB * 1024 * 1024;
 
@@ -36,7 +35,6 @@ export async function POST(req: Request) {
 
     const form = await req.formData();
 
-    // Accept "files" (multiple) and "file" (single)
     const rawFiles = [
       ...form.getAll("files"),
       ...(form.get("file") ? [form.get("file")] : []),
@@ -85,8 +83,8 @@ export async function POST(req: Request) {
       uploadedFileIds.push(uploaded.id);
     }
 
-    // Add to vector store AND WAIT until indexing finishes
-    const batch = await openai.vector_stores.file_batches.create_and_poll(
+    // ✅ Correct SDK casing for your version
+    const batch = await openai.vectorStores.fileBatches.createAndPoll(
       vectorStoreId,
       { file_ids: uploadedFileIds }
     );
@@ -98,15 +96,12 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Return a VERY compatible response so your widget doesn't complain
     return NextResponse.json({
       ok: true,
       success: true,
       message: "Added to knowledge base",
       status: "completed",
       file_batch_id: batch.id,
-
-      // return both field names (different UIs expect different keys)
       file_ids: uploadedFileIds,
       uploaded_file_ids: uploadedFileIds,
     });
