@@ -7,12 +7,39 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Hard fallback: remove common markdown formatting.
+// (Not perfect, but very effective for headings/bullets/bold/code.)
+function stripMarkdown(text: string) {
+  return text
+    // code fences
+    .replace(/```[\s\S]*?```/g, (m) => m.replace(/```/g, "").trim())
+    // inline code
+    .replace(/`([^`]+)`/g, "$1")
+    // bold/italic
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    // headings/quotes/list markers
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    // extra blank lines
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export async function POST(req: Request) {
   try {
-    const { message } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const message = body?.message;
 
     if (!message || typeof message !== "string") {
-      return NextResponse.json({ ok: false, error: "Missing message" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Missing message" },
+        { status: 400 }
+      );
     }
 
     const vectorStoreId = process.env.VECTOR_STORE_ID;
@@ -26,11 +53,15 @@ export async function POST(req: Request) {
     const system = `
 You are a proposal assistant.
 
-IMPORTANT:
+CRITICAL TOOL RULE:
 - You MUST use file_search to answer questions about uploaded documents.
-- Answer ONLY using retrieved text from the uploaded documents.
-- If nothing is found, say: "I searched the uploaded documents but found no matching text."
-- When possible, quote the supporting text in your answer.
+- Use ONLY retrieved text from the uploaded documents.
+- If nothing is found, say exactly: I searched the uploaded documents but found no matching text.
+
+CRITICAL OUTPUT RULE:
+- Output PLAIN TEXT ONLY.
+- Do NOT use Markdown (no bullets, no headings, no bold, no code blocks).
+- Use short paragraphs with normal sentences.
 `.trim();
 
     const result = await openai.responses.create({
@@ -47,9 +78,12 @@ IMPORTANT:
       ],
     });
 
+    const raw = result.output_text ?? "";
+    const reply = stripMarkdown(raw);
+
     return NextResponse.json({
       ok: true,
-      reply: result.output_text ?? "",
+      reply,
     });
   } catch (err: any) {
     return NextResponse.json(
