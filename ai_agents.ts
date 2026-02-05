@@ -29,7 +29,7 @@ Classify the user's request into ONE of the following values:
 
 Return ONLY valid JSON:
 { "classification": "<value>" }
-`.trim(),
+        `.trim(),
       },
       { role: "user", content: userInput },
     ],
@@ -37,7 +37,9 @@ Return ONLY valid JSON:
 
   const text = response.output_text ?? "{}";
   try {
-    return (JSON.parse(text).classification as string) || "corporate_admin";
+    const parsed = JSON.parse(text);
+    const c = String(parsed.classification || "");
+    return c || "corporate_admin";
   } catch {
     return "corporate_admin";
   }
@@ -77,12 +79,16 @@ Before answering:
 2) Answer ONLY using retrieved text.
 3) If nothing is found, say: "I searched the uploaded documents but found no matching text."
 4) Quote the supporting text in your answer.
-`.trim();
+  `.trim();
 
   const response = await client.responses.create({
     model: "gpt-4.1",
-    // ✅ IMPORTANT: your OpenAI SDK typing requires vector_store_ids here
-    tools: [{ type: "file_search", vector_store_ids: [vectorStoreId] }],
+    tools: [
+      {
+        type: "file_search",
+        vector_store_ids: [vectorStoreId],
+      },
+    ],
     input: [
       { role: "system", content: `${systemPrompt}\n\n${retrievalInstructions}` },
       { role: "user", content: userInput },
@@ -94,7 +100,6 @@ Before answering:
 
 /**
  * MAIN ENTRYPOINT
- * This is what your API route must call
  */
 export async function runWorkflow(userInput: string) {
   const classification = await classifyIntent(userInput);
