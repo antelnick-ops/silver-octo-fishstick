@@ -29,14 +29,18 @@ Classify the user's request into ONE of the following values:
 
 Return ONLY valid JSON:
 { "classification": "<value>" }
-        `.trim(),
+`.trim(),
       },
       { role: "user", content: userInput },
     ],
   });
 
   const text = response.output_text ?? "{}";
-  return (JSON.parse(text).classification as string) || "corporate_admin";
+  try {
+    return (JSON.parse(text).classification as string) || "corporate_admin";
+  } catch {
+    return "corporate_admin";
+  }
 }
 
 /**
@@ -67,23 +71,18 @@ async function runSpecialtyAgent(classification: string, userInput: string) {
   }
 
   const retrievalInstructions = `
-You MUST use file_search to answer questions about uploaded documents.
+You MUST use file_search to answer questions based on uploaded documents.
 Before answering:
-1) Use file_search to find relevant snippets.
+1) Use file_search to find relevant excerpts.
 2) Answer ONLY using retrieved text.
 3) If nothing is found, say: "I searched the uploaded documents but found no matching text."
-4) Cite quoted snippets clearly in your response.
+4) Quote the supporting text in your answer.
 `.trim();
 
   const response = await client.responses.create({
     model: "gpt-4.1",
-    // ✅ IMPORTANT: In openai@5.x TS types, file_search requires vector_store_ids here.
-    tools: [
-      {
-        type: "file_search",
-        vector_store_ids: [vectorStoreId],
-      },
-    ],
+    // ✅ IMPORTANT: your OpenAI SDK typing requires vector_store_ids here
+    tools: [{ type: "file_search", vector_store_ids: [vectorStoreId] }],
     input: [
       { role: "system", content: `${systemPrompt}\n\n${retrievalInstructions}` },
       { role: "user", content: userInput },
@@ -94,7 +93,8 @@ Before answering:
 }
 
 /**
- * MAIN ENTRYPOINT (called by your API route)
+ * MAIN ENTRYPOINT
+ * This is what your API route must call
  */
 export async function runWorkflow(userInput: string) {
   const classification = await classifyIntent(userInput);
