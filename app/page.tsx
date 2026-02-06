@@ -33,7 +33,65 @@ function isUploadOk(x: UploadResult): x is UploadOk {
   return (x as any)?.ok === true && Array.isArray((x as any)?.uploaded_file_ids);
 }
 
+const THEMES = {
+  dark: {
+    bg: "#0b0f19",
+    surface: "rgba(255,255,255,0.02)",
+    surfaceStrong: "rgba(255,255,255,0.06)",
+    text: "rgba(255,255,255,0.92)",
+    textMuted: "rgba(255,255,255,0.70)",
+    border: "rgba(255,255,255,0.10)",
+    borderSoft: "rgba(255,255,255,0.08)",
+    userBubble: "rgba(255,255,255,0.10)",
+    assistantBubble: "rgba(255,255,255,0.06)",
+    systemBubble: "rgba(255,255,255,0.03)",
+    btn: "rgba(255,255,255,0.06)",
+    btnStrong: "rgba(255,255,255,0.10)",
+    dot: "rgba(255,255,255,0.9)",
+    chatBg:
+      "radial-gradient(1200px 600px at 50% -100px, rgba(255,255,255,0.08), transparent 60%), #0b0f19",
+  },
+  light: {
+    bg: "#ffffff",
+    surface: "#f7f7fb",
+    surfaceStrong: "#ffffff",
+    text: "rgba(0,0,0,0.88)",
+    textMuted: "rgba(0,0,0,0.62)",
+    border: "rgba(0,0,0,0.12)",
+    borderSoft: "rgba(0,0,0,0.10)",
+    userBubble: "rgba(0,0,0,0.06)",
+    assistantBubble: "rgba(0,0,0,0.03)",
+    systemBubble: "rgba(0,0,0,0.02)",
+    btn: "#ffffff",
+    btnStrong: "#f0f0f5",
+    dot: "rgba(0,0,0,0.7)",
+    chatBg:
+      "radial-gradient(1200px 600px at 50% -100px, rgba(0,0,0,0.05), transparent 60%), #ffffff",
+  },
+} as const;
+
+type ThemeName = keyof typeof THEMES;
+
 export default function ChatLikeWidget() {
+  const [theme, setTheme] = useState<ThemeName>("dark");
+
+  // Persist theme
+  useEffect(() => {
+    const saved = localStorage.getItem("widget-theme");
+    if (saved === "light" || saved === "dark") setTheme(saved);
+    else {
+      // optional: default to system preference
+      const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+      setTheme(prefersDark ? "dark" : "light");
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("widget-theme", theme);
+  }, [theme]);
+
+  const t = THEMES[theme];
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: uid(),
@@ -58,6 +116,7 @@ export default function ChatLikeWidget() {
     [input, sending]
   );
 
+  // Auto-scroll chat on new message
   useEffect(() => {
     listRef.current?.scrollTo({
       top: listRef.current.scrollHeight,
@@ -81,7 +140,6 @@ export default function ChatLikeWidget() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Send only to YOUR backend (no OpenAI calls from browser)
         body: JSON.stringify({ message: text }),
       });
 
@@ -98,7 +156,6 @@ export default function ChatLikeWidget() {
         return;
       }
 
-      // support either { reply } or { answer } or { message }
       const reply =
         data?.reply ??
         data?.answer ??
@@ -138,7 +195,9 @@ export default function ChatLikeWidget() {
       const raw = await res.text();
       let data: UploadResult;
       try {
-        data = raw ? (JSON.parse(raw) as UploadResult) : ({ error: "Empty response" } as any);
+        data = raw
+          ? (JSON.parse(raw) as UploadResult)
+          : ({ error: "Empty response" } as any);
       } catch {
         data = { error: "Invalid JSON response from /api/upload", details: raw } as any;
       }
@@ -175,13 +234,211 @@ export default function ChatLikeWidget() {
     }
   }
 
+  function resetChat() {
+    setMessages([
+      {
+        id: uid(),
+        role: "assistant",
+        text: "New session started. Upload docs, then ask me anything.",
+        ts: Date.now(),
+      },
+    ]);
+    setUploadInfo("");
+    setFiles([]);
+    setInput("");
+  }
+
+  const styles: Record<string, React.CSSProperties> = {
+    shell: {
+      // Responsive sizing: fits within viewport and shrinks on small screens
+      width: "min(560px, 92vw)",
+      height: "min(650px, 80vh)",
+      maxHeight: "calc(100vh - 24px)",
+      margin: "12px auto",
+      border: `1px solid ${t.borderSoft}`,
+      borderRadius: 18,
+      overflow: "hidden",
+      background: t.bg,
+      color: t.text,
+      display: "flex",
+      flexDirection: "column",
+      minHeight: 0, // important for shrink/scroll
+      boxShadow:
+        theme === "dark"
+          ? "0 20px 60px rgba(0,0,0,0.45)"
+          : "0 20px 60px rgba(0,0,0,0.15)",
+    },
+
+    header: {
+      padding: "14px 14px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      borderBottom: `1px solid ${t.borderSoft}`,
+      background: t.bg,
+      gap: 10,
+      flexShrink: 0,
+    },
+
+    brand: { display: "flex", alignItems: "center", gap: 10, minWidth: 0 },
+    dot: {
+      width: 12,
+      height: 12,
+      borderRadius: 999,
+      background: t.dot,
+      flexShrink: 0,
+    },
+    title: { fontWeight: 700, fontSize: 14, letterSpacing: 0.2 },
+    subtitle: { fontSize: 12, color: t.textMuted, marginTop: 2 },
+
+    headerActions: { display: "flex", alignItems: "center", gap: 8 },
+
+    chat: {
+      flex: 1,
+      minHeight: 0,
+      padding: 14,
+      overflowY: "auto",
+      background: t.chatBg,
+    },
+
+    row: { display: "flex", marginBottom: 12 },
+
+    bubble: {
+      maxWidth: "86%",
+      borderRadius: 16,
+      padding: "10px 12px",
+      border: `1px solid ${t.border}`,
+      backdropFilter: "blur(10px)",
+      wordBreak: "break-word",
+    },
+    userBubble: { background: t.userBubble },
+    assistantBubble: { background: t.assistantBubble },
+    systemBubble: { background: t.systemBubble, opacity: 0.95 },
+
+    bubbleRole: { fontSize: 11, color: t.textMuted, marginBottom: 6 },
+    bubbleText: { whiteSpace: "pre-wrap", lineHeight: 1.35, fontSize: 13 },
+
+    uploadStrip: {
+      padding: "10px 12px",
+      display: "flex",
+      gap: 10,
+      alignItems: "flex-start",
+      borderTop: `1px solid ${t.borderSoft}`,
+      background: t.surface,
+      flexShrink: 0,
+    },
+
+    uploadBtn: {
+      padding: "10px 12px",
+      borderRadius: 14,
+      border: `1px solid ${t.border}`,
+      background: t.btn,
+      color: t.text,
+      fontWeight: 700,
+      cursor: "pointer",
+      whiteSpace: "nowrap",
+    },
+
+    uploadMeta: {
+      flex: 1,
+      display: "flex",
+      justifyContent: "space-between",
+      gap: 10,
+      minWidth: 0,
+    },
+
+    uploadFiles: { display: "flex", alignItems: "center", gap: 8, minHeight: 22, minWidth: 0 },
+    filesPreview: {
+      fontSize: 12,
+      color: t.textMuted,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+      minWidth: 0,
+    },
+    pill: {
+      fontSize: 11,
+      padding: "3px 8px",
+      borderRadius: 999,
+      border: `1px solid ${t.border}`,
+      background: t.btn,
+      color: t.text,
+      flexShrink: 0,
+    },
+    uploadActions: { display: "flex", alignItems: "center" },
+
+    uploadInfo: {
+      padding: "8px 12px",
+      fontSize: 12,
+      color: t.textMuted,
+      borderTop: `1px solid ${t.borderSoft}`,
+      background: t.surface,
+      flexShrink: 0,
+    },
+
+    composer: {
+      padding: 12,
+      display: "flex",
+      gap: 10,
+      borderTop: `1px solid ${t.borderSoft}`,
+      background: t.bg,
+      flexShrink: 0,
+    },
+
+    textarea: {
+      flex: 1,
+      resize: "none",
+      borderRadius: 14,
+      border: `1px solid ${t.border}`,
+      background: t.surfaceStrong,
+      color: t.text,
+      padding: "10px 12px",
+      outline: "none",
+      fontSize: 13,
+      lineHeight: 1.35,
+      minHeight: 42,
+      maxHeight: 120,
+    },
+
+    sendBtn: {
+      padding: "10px 14px",
+      borderRadius: 14,
+      border: `1px solid ${t.border}`,
+      background: t.btnStrong,
+      color: t.text,
+      fontWeight: 700,
+      minWidth: 74,
+    },
+
+    smallBtn: {
+      padding: "8px 10px",
+      borderRadius: 12,
+      border: `1px solid ${t.border}`,
+      background: t.btn,
+      color: t.text,
+      cursor: "pointer",
+      fontSize: 12,
+      fontWeight: 700,
+      whiteSpace: "nowrap",
+    },
+
+    footer: {
+      padding: "10px 12px",
+      fontSize: 11,
+      color: t.textMuted,
+      borderTop: `1px solid ${t.borderSoft}`,
+      background: t.bg,
+      flexShrink: 0,
+    },
+  };
+
   return (
     <div style={styles.shell}>
       {/* Header */}
       <div style={styles.header}>
         <div style={styles.brand}>
           <div style={styles.dot} />
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={styles.title}>Proposal Assistant</div>
             <div style={styles.subtitle}>
               Chat widget + file upload → vector store
@@ -189,25 +446,19 @@ export default function ChatLikeWidget() {
           </div>
         </div>
 
-        <button
-          style={styles.smallBtn}
-          onClick={() => {
-            setMessages([
-              {
-                id: uid(),
-                role: "assistant",
-                text: "New session started. Upload docs, then ask me anything.",
-                ts: Date.now(),
-              },
-            ]);
-            setUploadInfo("");
-            setFiles([]);
-            setInput("");
-          }}
-          title="New chat"
-        >
-          New
-        </button>
+        <div style={styles.headerActions}>
+          <button
+            style={styles.smallBtn}
+            onClick={() => setTheme((x) => (x === "dark" ? "light" : "dark"))}
+            title="Toggle theme"
+          >
+            {theme === "dark" ? "Light" : "Dark"}
+          </button>
+
+          <button style={styles.smallBtn} onClick={resetChat} title="New chat">
+            New
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -231,11 +482,7 @@ export default function ChatLikeWidget() {
               }}
             >
               <div style={styles.bubbleRole}>
-                {m.role === "user"
-                  ? "You"
-                  : m.role === "assistant"
-                  ? "Assistant"
-                  : "System"}
+                {m.role === "user" ? "You" : m.role === "assistant" ? "Assistant" : "System"}
               </div>
               <div style={styles.bubbleText}>{m.text}</div>
             </div>
@@ -274,7 +521,7 @@ export default function ChatLikeWidget() {
                 </span>
               </>
             ) : (
-              <span style={{ opacity: 0.75 }}>
+              <span style={{ color: t.textMuted }}>
                 Upload PDFs/DOCX/TXT to improve answers
               </span>
             )}
@@ -334,141 +581,3 @@ export default function ChatLikeWidget() {
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  shell: {
-    height: "100vh",
-    maxHeight: 650,
-    width: "100%",
-    maxWidth: 560,
-    margin: "0 auto",
-    border: "1px solid rgba(0,0,0,0.08)",
-    borderRadius: 18,
-    overflow: "hidden",
-    background: "#0b0f19",
-    color: "rgba(255,255,255,0.92)",
-    display: "flex",
-    flexDirection: "column",
-  },
-  header: {
-    padding: "14px 14px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottom: "1px solid rgba(255,255,255,0.08)",
-    background: "#0b0f19",
-  },
-  brand: { display: "flex", alignItems: "center", gap: 10 },
-  dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 999,
-    background: "rgba(255,255,255,0.9)",
-  },
-  title: { fontWeight: 700, fontSize: 14, letterSpacing: 0.2 },
-  subtitle: { fontSize: 12, opacity: 0.7, marginTop: 2 },
-  chat: {
-    flex: 1,
-    padding: 14,
-    overflowY: "auto",
-    background:
-      "radial-gradient(1200px 600px at 50% -100px, rgba(255,255,255,0.08), transparent 60%), #0b0f19",
-  },
-  row: { display: "flex", marginBottom: 12 },
-  bubble: {
-    maxWidth: "86%",
-    borderRadius: 16,
-    padding: "10px 12px",
-    border: "1px solid rgba(255,255,255,0.10)",
-    backdropFilter: "blur(10px)",
-  },
-  userBubble: { background: "rgba(255,255,255,0.10)" },
-  assistantBubble: { background: "rgba(255,255,255,0.06)" },
-  systemBubble: { background: "rgba(255,255,255,0.03)", opacity: 0.9 },
-  bubbleRole: { fontSize: 11, opacity: 0.65, marginBottom: 6 },
-  bubbleText: { whiteSpace: "pre-wrap", lineHeight: 1.35, fontSize: 13 },
-  composer: {
-    padding: 12,
-    display: "flex",
-    gap: 10,
-    borderTop: "1px solid rgba(255,255,255,0.08)",
-    background: "#0b0f19",
-  },
-  textarea: {
-    flex: 1,
-    resize: "none",
-    borderRadius: 14,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
-    color: "rgba(255,255,255,0.92)",
-    padding: "10px 12px",
-    outline: "none",
-    fontSize: 13,
-    lineHeight: 1.35,
-    minHeight: 42,
-    maxHeight: 120,
-  },
-  sendBtn: {
-    padding: "10px 14px",
-    borderRadius: 14,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.10)",
-    color: "rgba(255,255,255,0.92)",
-    fontWeight: 700,
-    minWidth: 74,
-  },
-  uploadStrip: {
-    padding: "10px 12px",
-    display: "flex",
-    gap: 10,
-    alignItems: "flex-start",
-    borderTop: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.02)",
-  },
-  uploadBtn: {
-    padding: "10px 12px",
-    borderRadius: 14,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
-    color: "rgba(255,255,255,0.92)",
-    fontWeight: 700,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-  },
-  uploadMeta: { flex: 1, display: "flex", justifyContent: "space-between", gap: 10 },
-  uploadFiles: { display: "flex", alignItems: "center", gap: 8, minHeight: 22 },
-  filesPreview: { fontSize: 12, opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis" },
-  pill: {
-    fontSize: 11,
-    padding: "3px 8px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
-  },
-  uploadActions: { display: "flex", alignItems: "center" },
-  uploadInfo: {
-    padding: "8px 12px",
-    fontSize: 12,
-    opacity: 0.85,
-    borderTop: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.02)",
-  },
-  smallBtn: {
-    padding: "8px 10px",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
-    color: "rgba(255,255,255,0.92)",
-    cursor: "pointer",
-    fontSize: 12,
-    fontWeight: 700,
-    whiteSpace: "nowrap",
-  },
-  footer: {
-    padding: "10px 12px",
-    fontSize: 11,
-    opacity: 0.65,
-    borderTop: "1px solid rgba(255,255,255,0.08)",
-    background: "#0b0f19",
-  },
-};
