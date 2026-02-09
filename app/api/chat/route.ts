@@ -3,42 +3,30 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 // Hard fallback: remove common markdown formatting.
-// (Not perfect, but very effective for headings/bullets/bold/code.)
 function stripMarkdown(text: string) {
   return text
-    // code fences
     .replace(/```[\s\S]*?```/g, (m) => m.replace(/```/g, "").trim())
-    // inline code
     .replace(/`([^`]+)`/g, "$1")
-    // bold/italic
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/\*([^*]+)\*/g, "$1")
     .replace(/__([^_]+)__/g, "$1")
     .replace(/_([^_]+)_/g, "$1")
-    // headings/quotes/list markers
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
     .replace(/^\s{0,3}>\s?/gm, "")
     .replace(/^\s*[-*+]\s+/gm, "")
     .replace(/^\s*\d+\.\s+/gm, "")
-    // extra blank lines
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const message = body?.message;
-
-    if (!message || typeof message !== "string") {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
       return NextResponse.json(
-        { ok: false, error: "Missing message" },
-        { status: 400 }
+        { ok: false, error: "Missing OPENAI_API_KEY env var" },
+        { status: 500 }
       );
     }
 
@@ -49,6 +37,19 @@ export async function POST(req: Request) {
         { status: 500 }
       );
     }
+
+    const body = await req.json().catch(() => ({}));
+    const message = body?.message;
+
+    if (!message || typeof message !== "string") {
+      return NextResponse.json(
+        { ok: false, error: "Missing message" },
+        { status: 400 }
+      );
+    }
+
+    // ✅ Create client only after env var checks
+    const openai = new OpenAI({ apiKey });
 
     const system = `
 You are a proposal assistant.
@@ -81,10 +82,7 @@ CRITICAL OUTPUT RULE:
     const raw = result.output_text ?? "";
     const reply = stripMarkdown(raw);
 
-    return NextResponse.json({
-      ok: true,
-      reply,
-    });
+    return NextResponse.json({ ok: true, reply });
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: "Chat failed", details: err?.message ?? String(err) },
