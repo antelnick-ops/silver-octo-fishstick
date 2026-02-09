@@ -34,6 +34,13 @@ function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
 
+function isUploadErr(x: UploadResult): x is UploadErr {
+  return x.ok === false;
+}
+function isChatErr(x: ChatResult): x is ChatErr {
+  return x.ok === false;
+}
+
 export default function Page() {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -60,7 +67,11 @@ export default function Page() {
   );
 
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+    // auto-scroll to bottom
+    listRef.current?.scrollTo({
+      top: listRef.current.scrollHeight,
+      behavior: "smooth",
+    });
   }, [messages.length]);
 
   function push(role: ChatMessage["role"], text: string) {
@@ -84,15 +95,18 @@ export default function Page() {
 
       const data = (await res.json()) as ChatResult;
 
-      if (!res.ok || !data.ok) {
-        const msg = "error" in data ? data.error : "Request failed";
-        push("system", `Error: ${msg}`);
+      // ✅ Correct narrowing for union
+      if (!res.ok || data.ok === false) {
+        const msg = isChatErr(data) ? data.error : "Request failed";
+        const details = isChatErr(data) && data.details ? ` (${data.details})` : "";
+        push("system", `Error: ${msg}${details}`);
         return;
       }
 
       push("assistant", data.reply);
-    } catch (e: any) {
-      push("system", `Network error: ${e?.message ?? String(e)}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      push("system", `Network error: ${msg}`);
     } finally {
       setSending(false);
     }
@@ -122,10 +136,13 @@ export default function Page() {
 
       const data = (await res.json()) as UploadResult;
 
-      if (!res.ok || !data.ok) {
-        const errMsg = data.error ?? "Upload failed";
-        setUploadInfo(`Upload failed: ${errMsg}`);
-        if (data.allowed?.length) {
+      // ✅ Correct narrowing for union
+      if (!res.ok || data.ok === false) {
+        const errMsg = isUploadErr(data) ? data.error : "Upload failed";
+        const details = isUploadErr(data) && data.details ? ` (${data.details})` : "";
+        setUploadInfo(`Upload failed: ${errMsg}${details}`);
+
+        if (isUploadErr(data) && data.allowed?.length) {
           push("system", `Allowed file types: ${data.allowed.join(", ")}`);
         }
         return;
@@ -140,10 +157,12 @@ export default function Page() {
         `📎 Uploaded ${files.length} file(s) to vector store. Ask your question now.`
       );
 
+      // clear selection
       setFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
-    } catch (e: any) {
-      setUploadInfo(`Upload error: ${e?.message ?? String(e)}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setUploadInfo(`Upload error: ${msg}`);
     } finally {
       setUploading(false);
     }
@@ -223,7 +242,7 @@ export default function Page() {
         />
 
         <button
-          style={styles.uploadBtn}
+          style={{ ...styles.uploadBtn, opacity: uploading ? 0.7 : 1 }}
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
           title="Choose files"
@@ -250,8 +269,8 @@ export default function Page() {
             <button
               style={{
                 ...styles.smallBtn,
-                opacity: files.length ? 1 : 0.5,
-                cursor: files.length ? "pointer" : "not-allowed",
+                opacity: files.length && !uploading ? 1 : 0.5,
+                cursor: files.length && !uploading ? "pointer" : "not-allowed",
               }}
               onClick={uploadFiles}
               disabled={!files.length || uploading}
